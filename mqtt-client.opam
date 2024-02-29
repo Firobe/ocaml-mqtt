@@ -4,25 +4,18 @@ synopsis: "MQTT client implementation for OCaml and ReasonML"
 maintainer: ["Rizo I. <rizo@odis.io>" "Leo Soares <leojrfs@gmail.com>"]
 authors: ["Rizo I. <rizo@odis.io>" "Josh Allmann <joshua.allmann@gmail.com>"]
 license: "BSD-3-clause"
-homepage: "https://github.com/hyper-systems/ocaml-mqtt"
+homepage: "https://github.com/Firobe/ocaml-mqtt"
 doc: "https://hyper-systems.github.io/ocaml-mqtt/mqtt-client"
-bug-reports: "https://github.com/hyper-systems/ocaml-mqtt/issues"
+bug-reports: "https://github.com/Firobe/ocaml-mqtt/issues"
 depends: [
   "ocaml" {>= "4.08.0"}
   "dune" {>= "3.13"}
   "ocplib-endian" {>= "0.6"}
   "logs" {>= "0.7.0"}
   "fmt" {>= "0.8.7"}
-  "lwt" {>= "5.7.0"}
-  "lwt_ppx" {>= "2.1.0"}
+  "eio"
+  "tls-eio"
   "tls" {>= "0.17.3"}
-  "tls-lwt" {>= "0.17.3"}
-  "alcotest" {with-test & >= "1.5.0"}
-  "alcotest-lwt" {with-test & >= "1.5.0"}
-  "cohttp" {with-test & >= "5.0.0"}
-  "cohttp-lwt-unix" {with-test & >= "5.0.0"}
-  "ocaml-lsp-server" {with-dev-setup}
-  "ocamlformat" {with-dev-setup & >= "0.26.1"}
   "odoc" {with-doc & >= "2.4.1"}
 ]
 build: [
@@ -39,4 +32,4 @@ build: [
     "@doc" {with-doc}
   ]
 ]
-dev-repo: "git+https://github.com/hyper-systems/ocaml-mqtt.git"
+dev-repo: "git+https://github.com/Firobe/ocaml-mqtt.git"

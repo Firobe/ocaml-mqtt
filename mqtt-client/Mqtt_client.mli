@@ -24,18 +24,21 @@ exception Connection_error
 type qos = Atmost_once | Atleast_once | Exactly_once
 
 val connect :
+  sw:Eio.Switch.t ->
+  net:'a Eio.Net.t ->
+  clock:'a Eio.Time.clock ->
   ?id:string ->
-  ?tls_ca:string ->
+  ?tls_ca:'a Eio.Path.t ->
   ?credentials:credentials ->
   ?will:string * string ->
   ?clean_session:bool ->
   ?keep_alive:int ->
-  ?on_message:(topic:string -> string -> unit Lwt.t) ->
-  ?on_disconnect:(t -> unit Lwt.t) ->
-  ?on_error:(t -> exn -> unit Lwt.t) ->
+  ?on_message:(topic:string -> string -> unit) ->
+  ?on_disconnect:(t -> unit) ->
+  ?on_error:(t -> exn -> unit) ->
   ?port:int ->
   string list ->
-  t Lwt.t
+  t
 (** Connects to the MQTT broker.
 
     Multiple hosts can be provided in case the broker supports failover. The
@@ -58,7 +61,7 @@ val connect :
       |> Lwt_main.run
     ]} *)
 
-val disconnect : t -> unit Lwt.t
+val disconnect : t -> unit
 (** Disconnects the client from the MQTT broker.
 
     {[
@@ -72,7 +75,7 @@ val publish :
   topic:string ->
   string ->
   t ->
-  unit Lwt.t
+  unit
 (** Publish a message with payload to a given topic.
 
     {[
@@ -80,7 +83,7 @@ val publish :
       let%lwt () = Mqtt_client.publish(~topic="news", payload, client);
     ]} *)
 
-val subscribe : (string * qos) list -> t -> unit Lwt.t
+val subscribe : (string * qos) list -> t -> unit
 (** Subscribes the client to a non-empty list of topics.
 
     {[
