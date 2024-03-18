@@ -70,13 +70,13 @@ let read_packets client =
     with Not_found -> failwith (fmt "ack for id=%d not found" id)
   in
 
-  let rec loop () =
+  let rec loop sw =
     let (_dup, qos, _retain), packet = read_packet client.cxn in
     let () =
       match packet with
       (* Publish with QoS 0: push *)
       | Publish (None, topic, payload) when qos = Atmost_once ->
-        client.on_message ~topic payload
+        Fiber.fork ~sw (fun () -> client.on_message ~topic payload)
       (* Publish with QoS 0 and packet identifier: error *)
       | Publish (Some _id, _topic, _payload) when qos = Atmost_once ->
         failwith
@@ -85,7 +85,7 @@ let read_packets client =
       | Publish (Some id, topic, payload) when qos = Atleast_once ->
         (* - Push the message to the consumer queue.
            - Send back the PUBACK packet. *)
-        client.on_message ~topic payload;
+        Fiber.fork ~sw (fun () -> client.on_message ~topic payload);
         let puback = Mqtt_packet.Encoder.puback id in
         Flow.copy_string puback client.cxn
       | Publish (None, _topic, _payload) when qos = Atleast_once ->
@@ -101,12 +101,12 @@ let read_packets client =
       | Pingresp -> ()
       | _ -> failwith "unknown packet from server"
     in
-    loop ()
+    loop sw
   in
 
   Log.debug (fun log -> log "[%s] Starting reader loop..." client.id);
   Eio.Switch.run ~name:"reader loop" (fun sw ->
-      Fiber.fork_daemon ~sw loop;
+      Fiber.fork_daemon ~sw (fun () -> loop sw);
       Condition.await_no_mutex client.should_stop_reader;
       Log.info (fun log -> log "[%s] Stopping reader loop..." client.id))
 
