@@ -25,10 +25,10 @@ type qos = Atmost_once | Atleast_once | Exactly_once
 
 val connect :
   sw:Eio.Switch.t ->
-  net:'a Eio.Net.t ->
-  clock:'a Eio.Time.clock ->
+  net:_ Eio.Net.t ->
+  clock:_ Eio.Time.clock ->
   ?id:string ->
-  ?tls_ca:'a Eio.Path.t ->
+  ?tls_ca:_ Eio.Path.t ->
   ?credentials:credentials ->
   ?will:string * string ->
   ?clean_session:bool ->
@@ -69,13 +69,7 @@ val disconnect : t -> unit
     ]} *)
 
 val publish :
-  ?dup:bool ->
-  ?qos:qos ->
-  ?retain:bool ->
-  topic:string ->
-  string ->
-  t ->
-  unit
+  ?dup:bool -> ?qos:qos -> ?retain:bool -> topic:string -> string -> t -> unit
 (** Publish a message with payload to a given topic.
 
     {[
