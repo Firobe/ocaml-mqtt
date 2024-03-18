@@ -221,7 +221,7 @@ let connect ~sw ~net ~clock ?(id = "ocaml-mqtt") ?tls_ca ?credentials ?will
 
     Fiber.fork ~sw (fun () ->
         Log.debug (fun log -> log "[%s] Packet reader started." client.id);
-        Switch.run (fun sw ->
+        Switch.run ~name:"mqtt" (fun sw ->
             Fiber.fork_daemon ~sw (fun () ->
                 run_pinger ~clock ~keep_alive client);
             wrap_catch client (fun () -> read_packets client));
