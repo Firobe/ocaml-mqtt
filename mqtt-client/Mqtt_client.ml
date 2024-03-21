@@ -19,7 +19,11 @@ let decode_length sock =
   in
   loop 0 1
 
-let read_packet sock =
+type cxflow = [ `Flow | `R | `W | `Shutdown ] Std.r
+type connection = { write_mutex : Eio.Mutex.t; flow : cxflow }
+
+let read_packet cxn =
+  let sock = cxn.flow in
   let header_byte = read_char sock in
   let msgid, opts =
     Mqtt_packet.Decoder.decode_fixed_header (Char.code header_byte)
@@ -39,8 +43,6 @@ let read_packet sock =
 
 module Log = Logs
 
-type connection = [ `Flow | `R | `W | `Shutdown ] Std.r
-
 type t = {
   cxn : connection;
   id : string;
@@ -50,6 +52,10 @@ type t = {
   on_error : t -> exn -> unit;
   should_stop_reader : Condition.t;
 }
+
+let write_string data cxn =
+  Eio.Mutex.use_rw ~protect:true cxn.write_mutex (fun () ->
+      Flow.copy_string data cxn.flow)
 
 let wrap_catch client f = try f () with exc -> client.on_error client exc
 
@@ -87,7 +93,7 @@ let read_packets client =
            - Send back the PUBACK packet. *)
         Fiber.fork ~sw (fun () -> client.on_message ~topic payload);
         let puback = Mqtt_packet.Encoder.puback id in
-        Flow.copy_string puback client.cxn
+        write_string puback client.cxn
       | Publish (None, _topic, _payload) when qos = Atleast_once ->
         failwith "protocol violation: publish packet with qos > 0 must have id"
       | Publish _ -> failwith "not supported publish packet (probably qos 2)"
@@ -113,7 +119,7 @@ let read_packets client =
 let disconnect client =
   Log.info (fun log -> log "[%s] Disconnecting client..." client.id);
   Condition.broadcast client.should_stop_reader;
-  Flow.copy_string (Mqtt_packet.Encoder.disconnect ()) client.cxn;
+  write_string (Mqtt_packet.Encoder.disconnect ()) client.cxn;
   client.on_disconnect client;
   Log.info (fun log -> log "[%s] Client disconnected." client.id)
 
@@ -129,7 +135,7 @@ let run_pinger ~clock ~keep_alive client =
   let rec loop () =
     Time.sleep clock keep_alive;
     let pingreq_packet = Mqtt_packet.Encoder.pingreq () in
-    Flow.copy_string pingreq_packet client.cxn;
+    write_string pingreq_packet client.cxn;
     loop ()
   in
   loop ()
@@ -141,7 +147,7 @@ let open_tcp_connection ~sw ~net ~client_id host port =
     Eio.Net.getaddrinfo_stream ~service:(string_of_int port) net host
   in
   match addresses with
-  | address :: _ -> (Eio.Net.connect ~sw net address :> connection)
+  | address :: _ -> (Eio.Net.connect ~sw net address :> cxflow)
   | _ ->
     Log.err (fun log ->
         log "[%s] could not get address info for %S" client_id host);
@@ -151,7 +157,7 @@ let open_tls_connection ~sw ~net ~client_id ~ca_file host port =
   let sock = open_tcp_connection ~sw ~net ~client_id host port in
   let authenticator = X509_eio.authenticator (`Ca_file ca_file) in
   let config = Tls.Config.client ~authenticator () in
-  (Tls_eio.client_of_flow config sock :> connection)
+  (Tls_eio.client_of_flow config sock :> cxflow)
 
 let rec create_connection ~sw ~net ?tls_ca ~port ~client_id hosts =
   match hosts with
@@ -191,17 +197,18 @@ let connect ~sw ~net ~clock ?(id = "ocaml-mqtt") ?tls_ca ?credentials ?will
     { Mqtt_packet.clientid = id; credentials; will; flags; keep_alive }
   in
 
-  let sock = create_connection ~sw ~net ?tls_ca ~port ~client_id:id hosts in
+  let flow = create_connection ~sw ~net ?tls_ca ~port ~client_id:id hosts in
+  let cxn = { flow; write_mutex = Eio.Mutex.create () } in
 
   let connect_packet =
     Mqtt_packet.Encoder.connect ?credentials:cxn_data.credentials
       ?will:cxn_data.will ~flags:cxn_data.flags ~keep_alive:cxn_data.keep_alive
       cxn_data.clientid
   in
-  Flow.copy_string connect_packet sock;
+  write_string connect_packet cxn;
   let inflight = Hashtbl.create 16 in
 
-  match read_packet sock with
+  match read_packet cxn with
   | _, Connack { connection_status = Accepted; session_present } ->
     Log.debug (fun log ->
         log "[%s] Connection acknowledged (session_present=%b)" id
@@ -209,7 +216,7 @@ let connect ~sw ~net ~clock ?(id = "ocaml-mqtt") ?tls_ca ?credentials ?will
 
     let client =
       {
-        cxn = sock;
+        cxn;
         id;
         inflight;
         should_stop_reader = Condition.create ();
@@ -248,7 +255,7 @@ let publish ?(dup = false) ?(qos = Mqtt_core.Atleast_once) ?(retain = false)
     let pkt_data =
       Mqtt_packet.Encoder.publish ~dup ~qos ~retain ~id:0 ~topic payload
     in
-    Flow.copy_string pkt_data client.cxn
+    write_string pkt_data client.cxn
   | Atleast_once ->
     let id = Mqtt_packet.gen_id () in
     let cond = Condition.create () in
@@ -257,7 +264,7 @@ let publish ?(dup = false) ?(qos = Mqtt_core.Atleast_once) ?(retain = false)
     let pkt_data =
       Mqtt_packet.Encoder.publish ~dup ~qos ~retain ~id ~topic payload
     in
-    Flow.copy_string pkt_data client.cxn;
+    write_string pkt_data client.cxn;
     Condition.await_no_mutex cond
   | Exactly_once ->
     let id = Mqtt_packet.gen_id () in
@@ -267,12 +274,12 @@ let publish ?(dup = false) ?(qos = Mqtt_core.Atleast_once) ?(retain = false)
     let pkt_data =
       Mqtt_packet.Encoder.publish ~dup ~qos ~retain ~id ~topic payload
     in
-    Flow.copy_string pkt_data client.cxn;
+    write_string pkt_data client.cxn;
     Condition.await_no_mutex cond;
     let expected_ack_pkt = Mqtt_packet.pubcomp id in
     Hashtbl.add client.inflight id (cond, expected_ack_pkt);
     let pkt_data = Mqtt_packet.Encoder.pubrel id in
-    Flow.copy_string pkt_data client.cxn;
+    write_string pkt_data client.cxn;
     Condition.await_no_mutex cond
 
 let subscribe topics client =
@@ -283,7 +290,7 @@ let subscribe topics client =
   let cond = Condition.create () in
   Hashtbl.add client.inflight pkt_id (cond, Suback (pkt_id, qos_list));
   wrap_catch client (fun () ->
-      Flow.copy_string subscribe_packet client.cxn;
+      write_string subscribe_packet client.cxn;
       Condition.await_no_mutex cond;
       let topics = List.map fst topics in
       Log.info (fun log ->
