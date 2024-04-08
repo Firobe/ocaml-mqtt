@@ -19,7 +19,7 @@ let decode_length sock =
   in
   loop 0 1
 
-type cxflow = [ `Flow | `R | `W | `Shutdown ] Std.r
+type cxflow = [ `Close | `Flow | `R | `W | `Shutdown ] Std.r
 type connection = { write_mutex : Eio.Mutex.t; flow : cxflow }
 
 let read_packet cxn =
@@ -125,7 +125,7 @@ let disconnect client =
 
 let shutdown client =
   Log.debug (fun log -> log "[%s] Shutting down the connection..." client.id);
-  (* Flow.close client.cxn; TODO implement close for TLS *)
+  (* Flow.close client.cxn; TODO implement close properly for TLS *)
   Log.debug (fun log -> log "[%s] Client connection shut down." client.id)
 
 let run_pinger ~clock ~keep_alive client =
